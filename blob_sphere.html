@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Iridescent Blob Sphere</title>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    // Simple Perlin noise generator
+    const perm = Array.from({length: 512}, (_, i) => i & 255).sort(() => Math.random() - 0.5);
+    const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (a, b, t) => (1 - t) * a + t * b;
+    const grad = (hash, x, y, z) => {
+      const h = hash & 15;
+      const u = h < 8 ? x : y;
+      const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+      return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    };
+    function noise(x, y, z) {
+      const X = Math.floor(x) & 255;
+      const Y = Math.floor(y) & 255;
+      const Z = Math.floor(z) & 255;
+      x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+      const u = fade(x), v = fade(y), w = fade(z);
+      const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z;
+      const B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+      return lerp(
+        lerp(lerp(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u),
+             lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+        lerp(lerp(grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1), u),
+             lerp(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v), w
+      );
+    }
+
+    // Three.js setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 100);
+    camera.position.z = 3;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    const createLayer = (radius, color, opacity) => {
+      const geometry = new THREE.SphereGeometry(radius, 128, 128);
+      const material = new THREE.MeshPhysicalMaterial({
+        transparent: true,
+        roughness: 0.15,
+        transmission: 1.0,
+        thickness: 0.6,
+        metalness: 0.4,
+        color: color,
+        opacity: opacity,
+        iridescence: 0.7,
+        iridescenceIOR: 1.3
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.original = geometry.attributes.position.array.slice();
+      return mesh;
+    };
+
+    const layers = [
+      createLayer(1.0, 0xffffff, 0.15),
+      createLayer(0.97, 0x99ccff, 0.1),
+      createLayer(0.94, 0xff88cc, 0.1)
+    ];
+    layers.forEach(layer => group.add(layer));
+
+    const clock = new THREE.Clock();
+    let deform = false;
+
+    const displace = (geom, original, t, intensity) => {
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const i3 = i * 3;
+        const ox = original[i3], oy = original[i3+1], oz = original[i3+2];
+        const nx = ox + noise(ox + t, oy, oz) * intensity;
+        const ny = oy + noise(ox, oy + t, oz) * intensity;
+        const nz = oz + noise(ox, oy, oz + t) * intensity;
+        pos.setXYZ(i, nx, ny, nz);
+      }
+      pos.needsUpdate = true;
+    };
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      group.rotation.y += 0.002;
+
+      if (deform) {
+        layers.forEach(mesh => {
+          displace(mesh.geometry, mesh.userData.original, t * 2, 0.08);
+        });
+      } else {
+        layers.forEach((mesh) => {
+          mesh.geometry.attributes.position.array.set(mesh.userData.original);
+          mesh.geometry.attributes.position.needsUpdate = true;
+        });
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // Interactivity
+    const enableDeform = () => { deform = true; };
+    const disableDeform = () => { deform = false; };
+
+    window.addEventListener("mousedown", enableDeform);
+    window.addEventListener("mouseup", disableDeform);
+    window.addEventListener("touchstart", enableDeform);
+    window.addEventListener("touchend", disableDeform);
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
